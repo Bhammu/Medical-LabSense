@@ -192,7 +192,7 @@ with tab1:
                 return "background-color:rgba(34,197,94,0.08);color:#4ade80"
 
             st.dataframe(
-                make_display_table(values, flags).style.applymap(color_status, subset=["Status"]),
+                make_display_table(values, flags).style.map(color_status, subset=["Status"]),
                 use_container_width=True, hide_index=True)
 
             row    = build_feature_row(values, feature_cols)
