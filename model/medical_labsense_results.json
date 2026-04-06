@@ -1,0 +1,46 @@
+{
+  "project": "Medical Labsense",
+  "target": "Iron_anemia_Class",
+  "dataset_size": 15300,
+  "model": "xgboost",
+  "config": {
+    "imputer": "knn",
+    "scaler": "standard",
+    "resampler": "undersample",
+    "feature_selection": "none",
+    "k_features": 10
+  },
+  "metrics": {
+    "balanced_accuracy": 0.9389,
+    "sensitivity": 0.9389,
+    "auc_roc": 0.972
+  },
+  "n_features": 25,
+  "features_used": [
+    "GENDER",
+    "WBC",
+    "NE#",
+    "LY#",
+    "MO#",
+    "EO#",
+    "BA#",
+    "RBC",
+    "HGB",
+    "HCT",
+    "MCV",
+    "MCH",
+    "MCHC",
+    "RDW",
+    "PLT",
+    "MPV",
+    "PCT",
+    "PDW",
+    "FOLATE",
+    "B12",
+    "MCV_MCH_ratio",
+    "HGB_RBC_ratio",
+    "RDW_high_flag",
+    "PLT_MPV_product",
+    "NE_LY_ratio"
+  ]
+}
