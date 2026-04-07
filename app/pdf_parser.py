@@ -35,19 +35,19 @@ LAB_PATTERNS = {
 }
 
 REFERENCE_RANGES = {
-    "WBC": (4.0, 11.0),
+    "WBC": (4000, 11000),
     "RBC": (4.5, 5.9),
     "HGB": (12.0, 17.0),
     "HCT": (37.0, 52.0),
     "MCV": (80.0, 100.0),
     "MCH": (27.0, 33.0),
     "MCHC": (32.0, 36.0),
-    "PLT": (150, 400),
+    "PLT": (150000, 410000)
 }
 
-# ─────────────────────────────────────────
+# ─────────────────────────────
 # TEXT EXTRACTION
-# ─────────────────────────────────────────
+# ─────────────────────────────
 
 def extract_text_from_pdf(pdf_file):
     text = ""
@@ -60,8 +60,6 @@ def extract_text_from_pdf(pdf_file):
 
 
 def extract_ocr_data(image_file):
-    import pytesseract
-
     img = Image.open(image_file)
     img = np.array(img)
 
@@ -75,20 +73,68 @@ def extract_ocr_data(image_file):
     return data
 
 
-# ─────────────────────────────────────────
-# OCR TABLE PARSING (CORE LOGIC)
-# ─────────────────────────────────────────
+# ─────────────────────────────
+# ROW GROUPING
+# ─────────────────────────────
 
 def group_rows(df):
     rows = {}
     for _, row in df.iterrows():
-        y = int(row['top'] // 10)  # group by vertical position
+        y = int(row['top'] // 10)
         if y not in rows:
             rows[y] = []
         rows[y].append(row['text'])
 
     return [" ".join(rows[k]) for k in sorted(rows.keys())]
 
+
+# ─────────────────────────────
+# FINAL VALUE EXTRACTION (FIXED)
+# ─────────────────────────────
+
+def extract_value_from_row(row, feature):
+    # Find keyword position
+    words = row.split()
+
+    for i, word in enumerate(words):
+        if any(k.lower() in word.lower() for k in LAB_PATTERNS.get(feature, [])):
+
+            # Look ONLY at next 2 tokens after keyword
+            candidates = words[i+1:i+4]
+
+            nums = []
+            for c in candidates:
+                matches = re.findall(r'\d+\.?\d*', c)
+                nums.extend([float(m) for m in matches])
+
+            if not nums:
+                return None
+
+            # % values
+            if feature in ["NE#", "LY#", "MO#", "EO#", "BA#"]:
+                nums = [n for n in nums if 0 <= n <= 100]
+                return nums[0] if nums else None
+
+            # RBC fix
+            if feature == "RBC":
+                nums = [n for n in nums if 0 < n < 10]
+                return nums[0] if nums else None
+
+            # Large values
+            if feature in ["WBC", "PLT"]:
+                nums = [n for n in nums if n > 100]
+                return nums[0] if nums else None
+
+            # General case
+            nums = [n for n in nums if n < 1000]
+            return nums[0] if nums else None
+
+    return None
+
+
+# ─────────────────────────────
+# EXTRACTION CORE
+# ─────────────────────────────
 
 def extract_from_rows(rows):
     extracted = {}
@@ -100,21 +146,15 @@ def extract_from_rows(rows):
         for row in rows:
             for kw in keywords:
                 if kw.lower() in row.lower():
-                    nums = re.findall(r'\d+\.?\d*', row)
-                    if nums:
-                        val = float(nums[0])
-                        if 0 < val < 100000:
-                            extracted[feature] = val
-                            break
+                    val = extract_value_from_row(row, feature)
+                    if val is not None:
+                        extracted[feature] = val
+                        break
             if feature in extracted:
                 break
 
     return extracted
 
-
-# ─────────────────────────────────────────
-# FALLBACK TEXT PARSER
-# ─────────────────────────────────────────
 
 def extract_from_text(text):
     extracted = {}
@@ -127,21 +167,19 @@ def extract_from_text(text):
         for line in lines:
             for kw in keywords:
                 if kw.lower() in line.lower():
-                    nums = re.findall(r'\d+\.?\d*', line)
-                    if nums:
-                        val = float(nums[0])
-                        if 0 < val < 100000:
-                            extracted[feature] = val
-                            break
+                    val = extract_value_from_row(line, feature)
+                    if val is not None:
+                        extracted[feature] = val
+                        break
             if feature in extracted:
                 break
 
     return extracted
 
 
-# ─────────────────────────────────────────
-# GENDER PARSER
-# ─────────────────────────────────────────
+# ─────────────────────────────
+# GENDER
+# ─────────────────────────────
 
 def parse_gender(text):
     text = text.upper()
@@ -152,9 +190,9 @@ def parse_gender(text):
     return 0.0
 
 
-# ─────────────────────────────────────────
-# MAIN FUNCTION
-# ─────────────────────────────────────────
+# ─────────────────────────────
+# MAIN
+# ─────────────────────────────
 
 def parse_lab_report(file, file_type):
 
@@ -169,8 +207,7 @@ def parse_lab_report(file, file_type):
 
         if len(extracted) < 3:
             text = " ".join(rows)
-            fallback = extract_from_text(text)
-            extracted.update(fallback)
+            extracted.update(extract_from_text(text))
 
         text = " ".join(rows)
 
@@ -185,9 +222,9 @@ def parse_lab_report(file, file_type):
     }
 
 
-# ─────────────────────────────────────────
+# ─────────────────────────────
 # FLAGS
-# ─────────────────────────────────────────
+# ─────────────────────────────
 
 def flag_abnormal(values):
     flags = []
@@ -195,30 +232,41 @@ def flag_abnormal(values):
         if key in values:
             v = values[key]
             if v < low:
-                flags.append({"feature": key, "value": v, "status": "LOW"})
+                flags.append({
+                    "feature": key,
+                    "value": v,
+                    "status": "LOW",
+                    "range": f"{low}-{high}"
+                })
             elif v > high:
-                flags.append({"feature": key, "value": v, "status": "HIGH"})
+                flags.append({
+                    "feature": key,
+                    "value": v,
+                    "status": "HIGH",
+                    "range": f"{low}-{high}"
+                })
     return flags
 
 
-# ─────────────────────────────────────────
+# ─────────────────────────────
 # MODEL INPUT
-# ─────────────────────────────────────────
+# ─────────────────────────────
 
 def build_feature_row(values, feature_cols):
     MEDIANS = {
-        "GENDER": 0, "WBC": 7.49, "RBC": 4.6,
-        "HGB": 13.5, "HCT": 40.0, "MCV": 88.0,
-        "MCH": 29.5, "MCHC": 33.5, "PLT": 240.0
+        "GENDER": 0,
+        "WBC": 7500,
+        "RBC": 4.6,
+        "HGB": 13.5,
+        "HCT": 40.0,
+        "MCV": 88.0,
+        "MCH": 29.5,
+        "MCHC": 33.5,
+        "PLT": 250000
     }
 
     row = {}
     for col in feature_cols:
-        if col in values:
-            row[col] = values[col]
-        elif col in MEDIANS:
-            row[col] = MEDIANS[col]
-        else:
-            row[col] = 0.0
+        row[col] = values.get(col, MEDIANS.get(col, 0.0))
 
     return pd.DataFrame([row])
